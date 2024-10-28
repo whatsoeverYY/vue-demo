@@ -1,7 +1,8 @@
 const data = {
     ok: true,
     content: 'content',
-    text: 'one'
+    text: 'one',
+    foo: 1,
 }
 let activeEffect
 const effectMap = new WeakMap() // 创建weakMap，以需要代理的对象作为key
@@ -32,32 +33,41 @@ function effect(fn) {
     effectFn()
 }
 
+const track = (target, key) => {
+    if (!activeEffect) return
+    let targetMap = effectMap.get(target)
+    if (!targetMap) {
+        effectMap.set(target, (targetMap = new Map)) // 创建map，以对象属性作为key
+    }
+    let buckets = targetMap.get(key)
+    if (!buckets) {
+        targetMap.set(key, (buckets = new Set())) // 创建set，存储副作用函数
+    }
+    buckets.add(activeEffect)
+    activeEffect.deps.push(buckets)
+}
+
+const trigger = (target, key) => {
+    const targetMap = effectMap.get(target)
+    if (!targetMap) return
+    const buckets = targetMap.get(key)
+    const bucketsToRun = new Set(buckets)
+    bucketsToRun.forEach(fn => {
+        if (fn !== activeEffect) {
+            fn()
+        }
+    })
+}
+
 // 数据代理
 const obj = new Proxy(data, {
-    get(target, prop) {
-        // console.log('get', prop)
-        if (!activeEffect) return
-        let targetMap = effectMap.get(target)
-        if (!targetMap) {
-            effectMap.set(target, (targetMap = new Map)) // 创建map，以对象属性作为key
-        }
-        let buckets = targetMap.get(prop)
-        if (!buckets) {
-            targetMap.set(prop, (buckets = new Set())) // 创建set，存储副作用函数
-        }
-        buckets.add(activeEffect)
-        activeEffect.deps.push(buckets)
-        return target[prop]
+    get(target, key) {
+        track(target, key)
+        return target[key]
     },
-    set(target, prop, newValue) {
-        // console.log('set', prop)
-        target[prop] = newValue
-        const targetMap = effectMap.get(target)
-        if (!targetMap) return
-        const buckets = targetMap.get(prop)
-        const bucketsToRun = new Set(buckets)
-        bucketsToRun.forEach(fn => fn())
-        return true
+    set(target, key, newValue) {
+        target[key] = newValue
+        trigger(target, key)
     },
 })
 
@@ -83,6 +93,12 @@ effect(() => {
     })
 
     console.log('obj.text', obj.text)
+})
+
+// 测试三
+effect(() => {
+    console.log('obj', obj.foo)
+    obj.foo++
 })
 
 obj.text = 'two' // 内外层副作用函数均执行
