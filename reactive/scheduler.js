@@ -50,7 +50,7 @@ const trigger = (target, key) => {
     if (!targetMap) return
     const buckets = targetMap.get(key)
     const bucketsToRun = new Set()
-    buckets.forEach(fn => {
+    buckets && buckets.forEach(fn => {
         if (fn !== activeEffect) {
             bucketsToRun.add(fn)
         }
