@@ -1,6 +1,5 @@
 const data = {
     count: 1,
-    price: 88
 }
 let activeEffect
 const effectMap = new WeakMap() // 创建weakMap，以需要代理的对象作为key
@@ -80,31 +79,56 @@ const obj = new Proxy(data, {
         trigger(target, key)
     },
 })
-
-function computed(getter) {
-    let value
-    let dirty = true
-    const effectFn = effect(getter, 
-        { 
-            lazy: true, 
-            scheduler() {
-                dirty = true
-            } 
-        }
-    )
-    const data = {
-        get value() {
-            if (dirty) {
-                value = effectFn()
-                dirty = false
-            }
-            return value
-        }
+function traverse(value, seen = new Set()) {
+    if (typeof value !== 'object' || value === null || seen.has(value)) return
+    seen.add(value)
+    for (const key in value) {
+        traverse(value[key], seen)
     }
-    return data
+    return value
+}
+function watch(source, cb, options = {}) {
+    let getter, oldValue, newValue
+    if (typeof source === 'function') {
+        getter = source
+    } else {
+        getter = () => traverse(source) // 读取响应式数据data中的所有属性
+    }
+    const job = () => {
+        newValue = effectFn()
+        cb(oldValue, newValue)
+        oldValue = newValue
+    }
+    const effectFn = effect(
+        () => getter(), 
+        {
+        lazy: true,
+        scheduler() {
+            if (options.flush === 'post') {
+                const p = Promise.resolve()
+                p.then(job)
+            } else {
+                job()
+            }
+        }
+    })
+    if (options.immediate) {
+        job()
+    } else {
+        oldValue = effectFn()
+    }
 }
 
-const totalPrice = computed(() => {
-    console.log('数量', obj.count)
-    return obj.count * obj.price
+// 存在问题，新旧数据一致，因为是对同一个对象的引用
+watch(obj, (newValue, oldValue) => {
+    console.log('data changed', newValue, oldValue)
 })
+
+watch(() => obj.count, (newValue, oldValue) => {
+    console.log('obj.count changed', newValue, oldValue)
+}, {immediate: true})
+watch(() => obj.count, (newValue, oldValue) => {
+    console.log('obj.count changed', newValue, oldValue)
+}, {flush: 'post'})
+
+obj.count++
