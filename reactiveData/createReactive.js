@@ -103,8 +103,10 @@ function createReactive(obj, isShallow = false, isReadonly = false) {
             const oldValue = target[key]
             const type = Object.prototype.hasOwnProperty.call(target, key) ? TriggerType.SET : TriggerType.ADD
             const res = Reflect.set(target, key, newValue, receiver)
-            if (oldValue !== newValue && (oldValue === oldValue || newValue === newValue)) {
-                trigger(target, key, type)
+            if (target === receiver[RAW]) { // 屏蔽由原型引起的更新
+                if (oldValue !== newValue && (oldValue === oldValue || newValue === newValue)) {
+                    trigger(target, key, type)
+                }
             }
             return res
         },

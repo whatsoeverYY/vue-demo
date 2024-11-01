@@ -44,11 +44,25 @@ const track = (target, key) => {
     activeEffect.deps.push(buckets)
 }
 
-const trigger = (target, key, type) => {
+const trigger = (target, key, type, newValue) => {
     const targetMap = effectMap.get(target)
     if (!targetMap) return
+
     const effects = targetMap.get(key)
     const effectsToRun = new Set()
+    
+    // 如果是修改了对象的length值，就把所有大于length值的索引对应的副作用函数拿出来执行
+    if (Array.isArray(target) && key === 'length') {
+        targetMap.forEach((effects, index) => {
+            if (index >= newValue) {
+                effects.forEach(fn => {
+                    if (fn !== activeEffect) {
+                        effectsToRun.add(fn)
+                    }
+                })
+            }
+        })
+    }
     effects && effects.forEach(fn => {
         if (fn !== activeEffect) {
             effectsToRun.add(fn)
@@ -57,6 +71,14 @@ const trigger = (target, key, type) => {
     if (type === TriggerType.DELETE || type === TriggerType.ADD) {
         const iterateEffect = targetMap.get(ITERATE_KEY)
         iterateEffect && iterateEffect.forEach(fn => {
+            if (fn !== activeEffect) {
+                effectsToRun.add(fn)
+            }
+        })
+    }
+    if (type === TriggerType.ADD && Array.isArray(target)) {
+        const lengthEffect = targetMap.get('length')
+        lengthEffect && lengthEffect.forEach(fn => {
             if (fn !== activeEffect) {
                 effectsToRun.add(fn)
             }
@@ -77,13 +99,14 @@ const TriggerType = {
     DELETE: 'DELETE'
 }
 const RAW = Symbol()
+
 function createReactive(obj, isShallow = false, isReadonly = false) {
     return new Proxy(obj, {
         get(target, key, receiver) {
             if (key === RAW) {
                 return target // 支持用户用RAW来访问原始对象
             }
-            if (!isReadonly) {
+            if (!isReadonly && typeof key !== 'symbol') {
                 track(target, key)
             }
             const res = Reflect.get(target, key, receiver)
@@ -91,8 +114,8 @@ function createReactive(obj, isShallow = false, isReadonly = false) {
                 return res
             }
             if (typeof res === 'object' && res !== null) {
-                return isReadonly ? readonly(res): reactive(res)
-            } 
+                return isReadonly ? readonly(res) : reactive(res)
+            }
             return res
         },
         set(target, key, newValue, receiver) {
@@ -101,10 +124,14 @@ function createReactive(obj, isShallow = false, isReadonly = false) {
                 return true
             }
             const oldValue = target[key]
-            const type = Object.prototype.hasOwnProperty.call(target, key) ? TriggerType.SET : TriggerType.ADD
+            const type = Array.isArray(target)
+                ? (Number(key) < target.length ? TriggerType.SET : TriggerType.ADD)
+                : (Object.prototype.hasOwnProperty.call(target, key) ? TriggerType.SET : TriggerType.ADD)
             const res = Reflect.set(target, key, newValue, receiver)
-            if (oldValue !== newValue && (oldValue === oldValue || newValue === newValue)) {
-                trigger(target, key, type)
+            if (target === receiver[RAW]) { // 屏蔽由原型引起的更新
+                if (oldValue !== newValue && (oldValue === oldValue || newValue === newValue)) {
+                    trigger(target, key, type, newValue)
+                }
             }
             return res
         },
@@ -125,7 +152,11 @@ function createReactive(obj, isShallow = false, isReadonly = false) {
             return Reflect.has(target, key)
         },
         ownKeys(target) {
-            track(target, ITERATE_KEY)
+            if (Array.isArray(target)) {
+                track(target, 'length')
+            } else {
+                track(target, ITERATE_KEY)
+            }
             return Reflect.ownKeys(target)
         }
     })
@@ -135,12 +166,12 @@ function reactive(obj) {
     return createReactive(obj)
 }
 
-const arr = [1,2,3]
+const arr = [1, 2, 3]
 
 const obj = reactive(arr)
 
 effect(() => {
-    console.log('index', obj[0])
+    console.log('index', obj[0], obj[7])
 })
 
 effect(() => {
@@ -156,11 +187,34 @@ effect(() => {
         console.log('objElement', objElement)
     }
 })
+// concat/join/every/some/find/findIndex/includes
+effect(() => {
+    console.log('concat', obj.concat([99]))
+})
 effect(() => {
     console.log('join', obj.join(','))
 })
 effect(() => {
+    console.log('every', obj.every(ele => ele))
+})
+effect(() => {
+    console.log('some', obj.some(ele => ele))
+})
+effect(() => {
+    console.log('find', obj.find((ele) => ele === 1))
+})
+effect(() => {
+    console.log('findIndex', obj.findIndex((ele) => ele === 2))
+})
+effect(() => {
     console.log('includes', obj.includes(1))
+})
+
+effect(() => {
+    console.log('push1', obj.push(1))
+})
+effect(() => {
+    console.log('push2', obj.push(1))
 })
 
 obj[0] = 0
