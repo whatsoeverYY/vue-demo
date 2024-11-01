@@ -135,26 +135,34 @@ function reactive(obj) {
     return createReactive(obj)
 }
 
-function shallowReactive(obj) {
-    return createReactive(obj, true)
-}
+const arr = [1,2,3]
 
-function readonly(obj) {
-    return createReactive(obj, false, true)
-}
-
-function shallowReadonly(obj) {
-    return createReactive(obj, true, true)
-}
-
-const data = {
-    one: {
-        name: 'ever'
-    }
-}
-
-const obj = reactive(data)
+const obj = reactive(arr)
 
 effect(() => {
-    console.log(obj.one.name)
+    console.log('index', obj[0])
 })
+
+effect(() => {
+    console.log('length', obj.length)
+})
+effect(() => {
+    for (const objKey in obj) {
+        console.log('objKey', objKey)
+    }
+})
+effect(() => {
+    for (const objElement of obj) {
+        console.log('objElement', objElement)
+    }
+})
+effect(() => {
+    console.log('join', obj.join(','))
+})
+effect(() => {
+    console.log('includes', obj.includes(1))
+})
+
+obj[0] = 0
+obj[4] = 5
+obj.length = 2
