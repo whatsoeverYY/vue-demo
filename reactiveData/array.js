@@ -1,6 +1,9 @@
 let activeEffect
 const effectMap = new WeakMap() // 创建weakMap，以需要代理的对象作为key
 const effectStack = []
+let shouldTrack = true
+
+const arrayInstruments = {}
 
 function cleanUp(fn) {
     const deps = fn.deps
@@ -14,7 +17,7 @@ function cleanUp(fn) {
 //副作用注册函数
 function effect(fn, options = {}) {
     const effectFn = () => {
-        cleanUp(effectFn)
+        // cleanUp(effectFn) // 多个副作用函数存在时，清理会出现问题
         activeEffect = effectFn
         effectStack.push(effectFn)
         const res = fn()
@@ -31,7 +34,7 @@ function effect(fn, options = {}) {
 }
 
 const track = (target, key) => {
-    if (!activeEffect) return
+    if (!activeEffect || !shouldTrack) return
     let targetMap = effectMap.get(target)
     if (!targetMap) {
         effectMap.set(target, (targetMap = new Map)) // 创建map，以对象属性作为key
@@ -100,11 +103,26 @@ const TriggerType = {
 }
 const RAW = Symbol()
 
+;['push', 'pop', 'shift', 'unshift', 'splice'].forEach(method => {
+    const originMethod = Array.prototype[method]
+    arrayInstruments[method] = function (...arg) {
+        shouldTrack = false
+        const res = originMethod.apply(this, arg)
+        shouldTrack = true
+        return res
+    }
+})
+
+
 function createReactive(obj, isShallow = false, isReadonly = false) {
     return new Proxy(obj, {
         get(target, key, receiver) {
+            console.log('get')
             if (key === RAW) {
                 return target // 支持用户用RAW来访问原始对象
+            }
+            if (Array.isArray(target) && arrayInstruments.hasOwnProperty(key)) {
+                return Reflect.get(arrayInstruments, key, receiver)
             }
             if (!isReadonly && typeof key !== 'symbol') {
                 track(target, key)
@@ -119,6 +137,7 @@ function createReactive(obj, isShallow = false, isReadonly = false) {
             return res
         },
         set(target, key, newValue, receiver) {
+            console.log('set')
             if (isReadonly) {
                 console.warn(`属性${key}是只读的`)
                 return true
