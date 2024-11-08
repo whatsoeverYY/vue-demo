@@ -1,6 +1,7 @@
 const queue = new Set()
 let isFlushing = false
 const p = new Promise.resolve()
+let currentInstance = null
 function queueJob(job) {
     queue.add(job)
     if (!isFlushing) {
@@ -16,27 +17,60 @@ function queueJob(job) {
     }
 }
 
+function onMounted(fn) {
+    if (currentInstance) {
+        currentInstance.mounted.push(fn)
+    }
+}
+
 function mountComponent(vnode, container) {
     const componentOptions = vnode.type
-    const { data, props: propsOption, render, beforeMount, mounted, beforeUpdate, updated } = componentOptions
+    let { data, props: propsOption, setup, render } = componentOptions
     const state = reactive(data())
     const [props, attrs] = resolveProps(propsOption, vnode.props)
+    const slots = vnode.children || {}
 
     const instance = {
         state,
         props: shallowReactive(props),
         isMounted: false,
-        subTree: null
+        subTree: null,
+        slots,
+        mounted: []
+    }
+    function emit(event, ...payload) {
+        const eventName = `on${event[0].toUpperCase()}${event.slice(1)}`
+        const handler = instance.props[eventName]
+        if (handler) {
+            handler(...payload)
+        } else {
+            console.error('事件不存在')
+        }
+    }
+    
+    const setupContext = { attrs, emit, slots }
+    currentInstance = instance
+    const setupResult = setup(shallowReadonly(instance.props), setupContext)
+    currentInstance = null
+    let setupState = null
+    if (typeof setupResult === 'function') {
+        if (render) console.error('setup函数返回渲染函数，render函数将被忽略')
+        render = setupResult
+    } else {
+        setupState = setupResult
     }
 
     vnode.component = instance
     const renderContent = new Proxy(instance, {
         get(target, key, receiver) {
             const {state, props} = target
+            if (key === 'slots') return slots
             if (state && key in state) {
                 return state[key]
             } else if (key in props) {
                 return props[key]
+            } else if (key in setupState) {
+                return setupState[key]
             } else {
                 console.error('不存在')
             }
@@ -47,7 +81,9 @@ function mountComponent(vnode, container) {
                 state[key] = newValue
             } else if (key in props) {
                 props[key] = newValue
-            } else {
+            } else if (key in setupState) {
+                setupState[key] = newValue
+            }  else {
                 console.error('不存在')
             }
         }
@@ -56,14 +92,11 @@ function mountComponent(vnode, container) {
     effect(() => {
         const subTree = render.call(renderContent, renderContent)
         if (!instance.isMounted) {
-            beforeMount && beforeMount.call(renderContent)
             patch(null, subTree, container)
             instance.isMounted = true
-            mounted && mounted.call(renderContent)
+            instance.mounted && instance.mounted.forEach(hook => hook.call(renderContent))
         } else {
-            beforeUpdate && beforeUpdate.call(renderContent)
             patch(instance.subTree, subTree. container)
-            updated && updated.call(renderContent)
         }
         instance.subTree = subTree
     }, {
@@ -87,23 +120,49 @@ function resolveProps(options, propsData) {
 const MyComponent = {
     name: 'MyComponent',
     props: {
-        title: String
+      title: String  
     },
-    data() {
+    setup(props, {emit}) {
+        const foo = ref(1)
+        emit('change', foo.value)
+        onMounted(() => {
+            console.log('挂载1')
+        })
+        onMounted(() => {
+            console.log('挂载2')
+        })
         return {
-            foo : 1
-        }
+            foo
+        }  
     },
     render() {
         return {
             type: 'div',
-            children: `foo的值为${this.foo}，title值为${this.title}`,
+            children: [
+                `foo的值为${this.foo}，title值为${this.title}`,
+                {
+                    type: 'div',
+                    children: [this.slots.header()]
+                }
+            ]
         }
     }
+}
+function handler(number) {
+    console.log('handler', number)
 }
 const CompVNode = {
     type: MyComponent,
     props: {
-        title: 'I am title'
+        title: 'content',
+        onChange: handler
+    },
+    children: {
+        header() {
+            return {
+                type: 'h1',
+                children: 'I am header'
+            }
+        }
     }
 }
