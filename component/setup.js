@@ -21,14 +21,26 @@ function mountComponent(vnode, container) {
     let { data, props: propsOption, setup, render, beforeMount, mounted, beforeUpdate, updated } = componentOptions
     const state = reactive(data())
     const [props, attrs] = resolveProps(propsOption, vnode.props)
+    const slots = vnode.children || {}
 
     const instance = {
         state,
         props: shallowReactive(props),
         isMounted: false,
-        subTree: null
+        subTree: null,
+        slots,
     }
-    const setupContext = { attrs }
+    function emit(event, ...payload) {
+        const eventName = `on${event[0].toUpperCase()}${event.slice(1)}`
+        const handler = instance.props[eventName]
+        if (handler) {
+            handler(...payload)
+        } else {
+            console.error('事件不存在')
+        }
+    }
+    
+    const setupContext = { attrs, emit, slots }
     const setupResult = setup(shallowReadonly(instance.props), setupContext)
     let setupState = null
     if (typeof setupResult === 'function') {
@@ -42,6 +54,7 @@ function mountComponent(vnode, container) {
     const renderContent = new Proxy(instance, {
         get(target, key, receiver) {
             const {state, props} = target
+            if (key === 'slots') return slots
             if (state && key in state) {
                 return state[key]
             } else if (key in props) {
@@ -102,8 +115,9 @@ const MyComponent = {
     props: {
       title: String  
     },
-    setup() {
+    setup(props, {emit}) {
       const foo = ref(1)
+        emit('change', foo.value)
       return {
           foo
       }  
@@ -111,13 +125,31 @@ const MyComponent = {
     render() {
         return {
             type: 'div',
-            children: `foo的值为${this.foo}，title值为${this.title}`
+            children: [
+                `foo的值为${this.foo}，title值为${this.title}`,
+                {
+                    type: 'div',
+                    children: [this.slots.header()]
+                }
+            ]
         }
     }
+}
+function handler(number) {
+    console.log('handler', number)
 }
 const CompVNode = {
     type: MyComponent,
     props: {
-        title: 'content'
+        title: 'content',
+        onChange: handler
+    },
+    children: {
+        header() {
+            return {
+                type: 'h1',
+                children: 'I am header'
+            }
+        }
     }
 }
